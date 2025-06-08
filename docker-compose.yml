@@ -1,0 +1,171 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-trade}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tradepass}
+      POSTGRES_DB: ${POSTGRES_DB:-tradedb}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - trade_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-trade}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  core-app:
+    build: ./core-app
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
+      - POSTGRES_USER=${POSTGRES_USER:-trade}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-tradepass}
+      - POSTGRES_DB=${POSTGRES_DB:-tradedb}
+      - POSTGRES_HOST=postgres
+      - TIMEFRAME=${TIMEFRAME:-15m}
+      - SEQ_LENGTH=${SEQ_LENGTH:-60}
+      - BT_RANGE=${BT_RANGE:-20240101-20240601}
+      - RETRAIN_EVERY=${RETRAIN_EVERY:-96}
+    volumes:
+      - ./core-app/src:/app/src
+      - app_data:/app/data
+      - model_data:/app/models
+    ports:
+      - "8501:8501"  # Streamlit
+      - "8000:8000"  # FastAPI (if needed)
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - trade_network
+    restart: unless-stopped
+
+  freqtrade-spot:
+    build: ./freqtrade
+    environment:
+      - FREQTRADE_MODE=spot
+      - CONFIG_FILE=/freqtrade/user_data/configs/spot.json
+    volumes:
+      - ./freqtrade/user_data:/freqtrade/user_data
+      - freqtrade_spot_data:/freqtrade/user_data/data
+    command: freqtrade trade --config /freqtrade/user_data/configs/spot.json --dry-run
+    depends_on:
+      - postgres
+      - core-app
+    networks:
+      - trade_network
+    restart: unless-stopped
+
+  freqtrade-margin:
+    build: ./freqtrade
+    environment:
+      - FREQTRADE_MODE=margin
+      - CONFIG_FILE=/freqtrade/user_data/configs/margin.json
+    volumes:
+      - ./freqtrade/user_data:/freqtrade/user_data
+      - freqtrade_margin_data:/freqtrade/user_data/data
+    command: freqtrade trade --config /freqtrade/user_data/configs/margin.json --dry-run
+    depends_on:
+      - postgres
+      - core-app
+    networks:
+      - trade_network
+    restart: unless-stopped
+
+  freqtrade-futures:
+    build: ./freqtrade
+    environment:
+      - FREQTRADE_MODE=futures
+      - CONFIG_FILE=/freqtrade/user_data/configs/futures.json
+    volumes:
+      - ./freqtrade/user_data:/freqtrade/user_data
+      - freqtrade_futures_data:/freqtrade/user_data/data
+    command: freqtrade trade --config /freqtrade/user_data/configs/futures.json --dry-run
+    depends_on:
+      - postgres
+      - core-app
+    networks:
+      - trade_network
+    restart: unless-stopped
+
+  airflow-webserver:
+    build: ./airflow
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${POSTGRES_USER:-trade}:${POSTGRES_PASSWORD:-tradepass}@postgres/${POSTGRES_DB:-tradedb}
+      - AIRFLOW__CORE__FERNET_KEY=Ua1QQ8qp-F8UWnLgqLQdAoJJFt5TLqcGH6HuH-DQS4Q=
+      - AIRFLOW__WEBSERVER__DEFAULT_USER_USERNAME=airflow
+      - AIRFLOW__WEBSERVER__DEFAULT_USER_PASSWORD=airflow
+      - AIRFLOW__WEBSERVER__DEFAULT_USER_FIRSTNAME=Airflow
+      - AIRFLOW__WEBSERVER__DEFAULT_USER_LASTNAME=Admin
+      - AIRFLOW__WEBSERVER__DEFAULT_USER_EMAIL=admin@example.com
+      - AIRFLOW__WEBSERVER__DEFAULT_USER_ROLE=Admin
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
+      - POSTGRES_USER=${POSTGRES_USER:-trade}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-tradepass}
+      - POSTGRES_DB=${POSTGRES_DB:-tradedb}
+      - POSTGRES_HOST=postgres
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - airflow_logs:/opt/airflow/logs
+      - airflow_plugins:/opt/airflow/plugins
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - trade_network
+    command: >
+      bash -c "airflow db init && 
+               airflow users create --username airflow --firstname Airflow --lastname Admin --role Admin --email admin@example.com --password airflow &&
+               airflow webserver"
+    restart: unless-stopped
+
+  airflow-scheduler:
+    build: ./airflow
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${POSTGRES_USER:-trade}:${POSTGRES_PASSWORD:-tradepass}@postgres/${POSTGRES_DB:-tradedb}
+      - AIRFLOW__CORE__FERNET_KEY=Ua1QQ8qp-F8UWnLgqLQdAoJJFt5TLqcGH6HuH-DQS4Q=
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
+      - POSTGRES_USER=${POSTGRES_USER:-trade}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-tradepass}
+      - POSTGRES_DB=${POSTGRES_DB:-tradedb}
+      - POSTGRES_HOST=postgres
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - airflow_logs:/opt/airflow/logs
+      - airflow_plugins:/opt/airflow/plugins
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - trade_network
+    command: airflow scheduler
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  app_data:
+  model_data:
+  freqtrade_spot_data:
+  freqtrade_margin_data:
+  freqtrade_futures_data:
+  airflow_logs:
+  airflow_plugins:
+
+networks:
+  trade_network:
+    driver: bridge

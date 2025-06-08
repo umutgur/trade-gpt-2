@@ -1,0 +1,74 @@
+# Environment files
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Data files
+*.csv
+*.h5
+*.pkl
+*.joblib
+data/
+models/
+user_data/data/
+user_data/logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+.dockerignore
+
+# Airflow
+airflow/logs/
+airflow/plugins/
+
+# Jupyter
+.jupyter/
+*.ipynb_checkpoints/
+
+# TensorFlow
+*.pb
+*.h5
+saved_model/
+
+# Temporary files
+tmp/
+temp/
