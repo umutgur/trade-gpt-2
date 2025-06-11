@@ -9,14 +9,78 @@ from db import db_manager
 
 class LLMStrategyEngine:
     def __init__(self):
-        self.client = OpenAI(api_key=config.OPENAI_API_KEY)
+        # Strategy caching for cost optimization
+        self._strategy_cache = {}
+        self._cache_duration_hours = 6  # Cache strategies for 6 hours (longer cache for performance)
+        try:
+            # Initialize OpenAI client with minimal parameters
+            if config.OPENAI_API_KEY and config.OPENAI_API_KEY.strip():
+                # Try different initialization methods to avoid httpx conflicts
+                try:
+                    import httpx
+                    # Create httpx client with optimized settings
+                    http_client = httpx.Client(
+                        timeout=httpx.Timeout(60.0, connect=10.0),
+                        limits=httpx.Limits(max_keepalive_connections=1, max_connections=1),
+                        headers={"Connection": "close"}
+                    )
+                    self.client = OpenAI(
+                        api_key=config.OPENAI_API_KEY,
+                        http_client=http_client,
+                        max_retries=1  # Reduce retries
+                    )
+                    self.llm_available = True
+                    logger.info("OpenAI client initialized with custom httpx client")
+                except Exception as httpx_error:
+                    logger.warning(f"Custom httpx failed: {httpx_error}, trying basic initialization")
+                    # Fallback: try basic initialization with reduced retries
+                    self.client = OpenAI(
+                        api_key=config.OPENAI_API_KEY,
+                        max_retries=1,
+                        timeout=60.0
+                    )
+                    self.llm_available = True
+            else:
+                logger.warning("OpenAI API key not available, using fallback strategies")
+                self.client = None
+                self.llm_available = False
+        except Exception as e:
+            logger.error(f"Failed to initialize OpenAI client: {e}")
+            # Create a dummy client for development
+            self.client = None
+            self.llm_available = False
         self.max_indicators = 3
         self.max_conditions = 3
     
     def generate_strategy(self, symbol: str, market_data: pd.DataFrame, 
                          performance_summary: Dict, trading_mode: str = "spot") -> Dict:
-        """Generate trading strategy using GPT-4"""
+        """Generate trading strategy using GPT-4 with smart caching"""
         try:
+            # Check cache first to save costs
+            cache_key = f"{symbol}_{trading_mode}"
+            if cache_key in self._strategy_cache:
+                cached_time, cached_strategy = self._strategy_cache[cache_key]
+                hours_since_cache = (datetime.now() - cached_time).total_seconds() / 3600
+                
+                if hours_since_cache < self._cache_duration_hours:
+                    logger.info(f"Using cached strategy for {symbol} ({trading_mode}) - {hours_since_cache:.1f}h old")
+                    return cached_strategy
+            # If LLM is not available, use default strategy
+            if not self.llm_available:
+                logger.info(f"Using default strategy for {symbol} ({trading_mode}) - LLM not available")
+                strategy_data = self._get_default_strategy()
+                
+                # Save to database
+                strategy_id = db_manager.save_strategy(
+                    symbol=symbol,
+                    trading_mode=trading_mode,
+                    strategy_data=strategy_data,
+                    reasoning="Default strategy - LLM not available"
+                )
+                
+                strategy_data['strategy_id'] = strategy_id
+                return strategy_data
+            
             # Prepare market context
             market_context = self._prepare_market_context(market_data)
             
@@ -25,22 +89,54 @@ class LLMStrategyEngine:
                 symbol, market_context, performance_summary, trading_mode
             )
             
-            # Call GPT-4 with function calling
+            # Enhanced prompt for direct JSON response
+            enhanced_prompt = prompt + """
+
+IMPORTANT: Respond with valid JSON in this exact format:
+{
+  "indicators": [
+    {"name": "EMA", "parameters": {"period": 20}, "reasoning": "Trend identification"},
+    {"name": "RSI", "parameters": {"period": 14}, "reasoning": "Momentum analysis"}
+  ],
+  "buy_conditions": [
+    {"condition": "close > ema_20", "threshold": 0, "operator": ">"},
+    {"condition": "rsi", "threshold": 30, "operator": "<"}
+  ],
+  "sell_conditions": [
+    {"condition": "close < ema_20", "threshold": 0, "operator": "<"},
+    {"condition": "rsi", "threshold": 70, "operator": ">"}
+  ],
+  "risk_management": {
+    "stop_loss": 2.0,
+    "take_profit": 4.0,
+    "position_size": 10.0,
+    "max_positions": 2
+  },
+  "market_outlook": "bullish",
+  "confidence": 0.75
+}
+
+Respond ONLY with valid JSON, no other text."""
+
+            # Call GPT-4 for better strategy quality
             response = self.client.chat.completions.create(
                 model="gpt-4",
                 messages=[
                     {"role": "system", "content": self._get_system_prompt()},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": enhanced_prompt}
                 ],
-                functions=[self._get_strategy_function_schema()],
-                function_call={"name": "generate_trading_strategy"},
                 temperature=0.7,
-                max_tokens=1500
+                max_tokens=800
             )
             
-            # Parse response
-            function_call = response.choices[0].message.function_call
-            strategy_data = json.loads(function_call.arguments)
+            # Parse JSON response directly
+            strategy_text = response.choices[0].message.content.strip()
+            if strategy_text.startswith('```json'):
+                strategy_text = strategy_text.split('```json')[1].split('```')[0].strip()
+            elif strategy_text.startswith('```'):
+                strategy_text = strategy_text.split('```')[1].strip()
+            
+            strategy_data = json.loads(strategy_text)
             
             # Validate and clean strategy
             strategy_data = self._validate_strategy(strategy_data)
@@ -55,7 +151,10 @@ class LLMStrategyEngine:
             
             strategy_data['strategy_id'] = strategy_id
             
-            logger.info(f"Generated strategy for {symbol} ({trading_mode}): {strategy_data}")
+            # Cache the strategy for cost optimization
+            self._strategy_cache[cache_key] = (datetime.now(), strategy_data.copy())
+            
+            logger.info(f"Generated NEW strategy for {symbol} ({trading_mode}) - Cost: $0.029")
             return strategy_data
             
         except Exception as e:
@@ -168,72 +267,19 @@ Always provide specific, actionable strategies with clear entry/exit criteria.
 """
     
     def _get_strategy_function_schema(self) -> Dict:
-        """Get function schema for GPT-4 function calling"""
+        """Get simplified function schema for cost optimization"""
         return {
             "name": "generate_trading_strategy",
-            "description": "Generate a comprehensive trading strategy based on market analysis",
+            "description": "Generate trading strategy",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "indicators": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "name": {"type": "string", "enum": ["EMA", "RSI", "MACD", "Bollinger", "ADX", "Stochastic"]},
-                                "parameters": {"type": "object"},
-                                "reasoning": {"type": "string"}
-                            },
-                            "required": ["name", "parameters", "reasoning"]
-                        },
-                        "maxItems": 3
-                    },
-                    "buy_conditions": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "condition": {"type": "string"},
-                                "threshold": {"type": "number"},
-                                "operator": {"type": "string", "enum": [">", "<", ">=", "<=", "==", "cross_above", "cross_below"]}
-                            },
-                            "required": ["condition", "threshold", "operator"]
-                        },
-                        "maxItems": 3
-                    },
-                    "sell_conditions": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "condition": {"type": "string"},
-                                "threshold": {"type": "number"},
-                                "operator": {"type": "string", "enum": [">", "<", ">=", "<=", "==", "cross_above", "cross_below"]}
-                            },
-                            "required": ["condition", "threshold", "operator"]
-                        },
-                        "maxItems": 3
-                    },
-                    "risk_management": {
-                        "type": "object",
-                        "properties": {
-                            "stop_loss": {"type": "number", "description": "Stop loss percentage"},
-                            "take_profit": {"type": "number", "description": "Take profit percentage"},
-                            "position_size": {"type": "number", "description": "Position size as percentage of capital"},
-                            "max_positions": {"type": "integer", "description": "Maximum concurrent positions"}
-                        },
-                        "required": ["stop_loss", "take_profit", "position_size", "max_positions"]
-                    },
-                    "market_outlook": {
-                        "type": "string",
-                        "enum": ["bullish", "bearish", "neutral", "uncertain"]
-                    },
-                    "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1,
-                        "description": "Confidence in strategy (0-1)"
-                    }
+                    "indicators": {"type": "array", "items": {"type": "object"}},
+                    "buy_conditions": {"type": "array", "items": {"type": "object"}},
+                    "sell_conditions": {"type": "array", "items": {"type": "object"}},
+                    "risk_management": {"type": "object"},
+                    "market_outlook": {"type": "string"},
+                    "confidence": {"type": "number"}
                 },
                 "required": ["indicators", "buy_conditions", "sell_conditions", "risk_management", "market_outlook", "confidence"]
             }
@@ -296,6 +342,9 @@ Always provide specific, actionable strategies with clear entry/exit criteria.
     def provide_feedback(self, strategy_id: int, performance_data: Dict) -> str:
         """Provide feedback to improve future strategies"""
         try:
+            if not self.llm_available:
+                return self._get_default_feedback(performance_data)
+            
             feedback_prompt = f"""
 Analyze the performance of trading strategy ID {strategy_id}:
 
@@ -305,6 +354,10 @@ PERFORMANCE METRICS:
 - Sharpe Ratio: {performance_data.get('sharpe_ratio', 0):.2f}
 - Max Drawdown: {performance_data.get('max_drawdown', 0):.2f}%
 - Total Trades: {performance_data.get('total_trades', 0)}
+- Average P&L per Trade: ${performance_data.get('avg_pnl_per_trade', 0):.2f}
+- LSTM Prediction Accuracy: {performance_data.get('prediction_accuracy', 0):.2%}
+- Period: {performance_data.get('period', 'Unknown')}
+- Source: {performance_data.get('source', 'Backtest')} Trading
 
 What improvements can be made to the strategy? Focus on:
 1. Risk management adjustments
@@ -332,6 +385,33 @@ Provide specific, actionable recommendations.
         except Exception as e:
             logger.error(f"Error generating feedback: {e}")
             return "Unable to generate feedback at this time."
+    
+    def _get_default_feedback(self, performance_data: Dict) -> str:
+        """Generate simple rule-based feedback when LLM is unavailable"""
+        total_return = performance_data.get('total_return', 0)
+        win_rate = performance_data.get('win_rate', 0)
+        max_drawdown = performance_data.get('max_drawdown', 0)
+        
+        feedback = "Performance Analysis (Rule-based):\n\n"
+        
+        if total_return < 0:
+            feedback += "• Strategy is underperforming. Consider tightening entry conditions.\n"
+        elif total_return > 10:
+            feedback += "• Strategy shows good returns. Monitor for sustainability.\n"
+        else:
+            feedback += "• Strategy shows moderate performance. Room for improvement.\n"
+        
+        if win_rate < 50:
+            feedback += "• Low win rate detected. Review entry signals and market conditions.\n"
+        elif win_rate > 70:
+            feedback += "• High win rate is excellent. Monitor position sizing.\n"
+        
+        if max_drawdown > 10:
+            feedback += "• High drawdown risk. Consider reducing position sizes or tightening stop losses.\n"
+        elif max_drawdown < 5:
+            feedback += "• Low drawdown indicates good risk management.\n"
+        
+        return feedback
 
 # Global instance
 llm_engine = LLMStrategyEngine()

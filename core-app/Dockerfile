@@ -2,11 +2,16 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies including timezone data
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
+
+# Set timezone to Turkey
+ENV TZ=Europe/Istanbul
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # Copy requirements first for better layer caching
 COPY requirements.txt .

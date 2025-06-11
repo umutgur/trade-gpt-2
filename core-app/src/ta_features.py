@@ -39,8 +39,17 @@ class TechnicalAnalysis:
             # Price action features
             df_copy = self.add_price_action_features(df_copy)
             
-            # Fill NaN values
-            df_copy = df_copy.fillna(method='bfill').fillna(method='ffill')
+            # Better NaN handling: fill with reasonable values
+            # First forward fill, then backward fill, then use median for remaining NaNs
+            df_copy = df_copy.ffill().bfill()
+            
+            # For any remaining NaN values, fill with column median or 0
+            for col in df_copy.select_dtypes(include=[np.number]).columns:
+                if df_copy[col].isnull().any():
+                    median_val = df_copy[col].median()
+                    if pd.isna(median_val):
+                        median_val = 0
+                    df_copy[col] = df_copy[col].fillna(median_val)
             
             logger.info(f"Added technical features, shape: {df_copy.shape}")
             return df_copy
@@ -51,26 +60,42 @@ class TechnicalAnalysis:
     
     def add_trend_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """Add trend-based indicators"""
-        # Simple Moving Averages
-        df['sma_20'] = ta.trend.sma_indicator(df['close'], window=20)
-        df['sma_50'] = ta.trend.sma_indicator(df['close'], window=50)
-        df['sma_200'] = ta.trend.sma_indicator(df['close'], window=200)
+        # Simple Moving Averages - adjust window sizes based on available data
+        data_length = len(df)
         
-        # Exponential Moving Averages
-        df['ema_12'] = ta.trend.ema_indicator(df['close'], window=12)
-        df['ema_26'] = ta.trend.ema_indicator(df['close'], window=26)
-        df['ema_50'] = ta.trend.ema_indicator(df['close'], window=50)
+        # Use adaptive window sizes to prevent NaN values
+        sma_20_window = min(20, max(5, data_length // 5))
+        sma_50_window = min(50, max(10, data_length // 4))
+        sma_200_window = min(200, max(20, data_length // 2))
         
-        # MACD
-        macd = ta.trend.MACD(df['close'])
+        df['sma_20'] = ta.trend.sma_indicator(df['close'], window=sma_20_window)
+        df['sma_50'] = ta.trend.sma_indicator(df['close'], window=sma_50_window)
+        df['sma_200'] = ta.trend.sma_indicator(df['close'], window=sma_200_window)
+        
+        # Exponential Moving Averages - also use adaptive windows
+        ema_12_window = min(12, max(3, data_length // 8))
+        ema_26_window = min(26, max(6, data_length // 6))
+        ema_50_window = min(50, max(10, data_length // 4))
+        
+        df['ema_12'] = ta.trend.ema_indicator(df['close'], window=ema_12_window)
+        df['ema_26'] = ta.trend.ema_indicator(df['close'], window=ema_26_window)
+        df['ema_50'] = ta.trend.ema_indicator(df['close'], window=ema_50_window)
+        
+        # MACD - use adaptive parameters
+        macd_fast = min(12, max(3, data_length // 10))
+        macd_slow = min(26, max(6, data_length // 6))
+        macd_signal = min(9, max(3, data_length // 15))
+        
+        macd = ta.trend.MACD(df['close'], window_fast=macd_fast, window_slow=macd_slow, window_sign=macd_signal)
         df['macd'] = macd.macd()
         df['macd_signal'] = macd.macd_signal()
         df['macd_histogram'] = macd.macd_diff()
         
-        # ADX (Average Directional Index)
-        df['adx'] = ta.trend.adx(df['high'], df['low'], df['close'], window=14)
-        df['adx_pos'] = ta.trend.adx_pos(df['high'], df['low'], df['close'], window=14)
-        df['adx_neg'] = ta.trend.adx_neg(df['high'], df['low'], df['close'], window=14)
+        # ADX (Average Directional Index) - use adaptive window
+        adx_window = min(14, max(5, data_length // 8))
+        df['adx'] = ta.trend.adx(df['high'], df['low'], df['close'], window=adx_window)
+        df['adx_pos'] = ta.trend.adx_pos(df['high'], df['low'], df['close'], window=adx_window)
+        df['adx_neg'] = ta.trend.adx_neg(df['high'], df['low'], df['close'], window=adx_window)
         
         return df
     
@@ -116,8 +141,8 @@ class TechnicalAnalysis:
     
     def add_volume_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """Add volume-based indicators"""
-        # Volume SMA
-        df['volume_sma'] = ta.volume.volume_sma(df['close'], df['volume'])
+        # Volume SMA (manual calculation)
+        df['volume_sma'] = df['volume'].rolling(window=20).mean()
         
         # On Balance Volume
         df['obv'] = ta.volume.on_balance_volume(df['close'], df['volume'])
@@ -127,6 +152,9 @@ class TechnicalAnalysis:
         
         # Volume Rate of Change
         df['volume_roc'] = df['volume'].pct_change(periods=12)
+        
+        # Volume weighted average price (VWAP) approximation
+        df['vwap'] = (df['volume'] * (df['high'] + df['low'] + df['close']) / 3).rolling(window=20).sum() / df['volume'].rolling(window=20).sum()
         
         return df
     
@@ -159,6 +187,11 @@ class TechnicalAnalysis:
     def get_features_for_ml(self, df: pd.DataFrame, target_col: str = 'close') -> Dict:
         """Prepare features for machine learning"""
         try:
+            # Check minimum data requirements
+            if len(df) < 20:
+                logger.warning(f"Insufficient data for ML features: {len(df)} < 20")
+                return {}
+            
             # Add all technical features
             df_features = self.add_all_features(df)
             
@@ -168,6 +201,12 @@ class TechnicalAnalysis:
             
             # Prepare features matrix
             X = df_features[feature_cols].values
+            
+            # Additional NaN check after feature preparation
+            nan_count = np.isnan(X).sum()
+            if nan_count > 0:
+                logger.warning(f"Found {nan_count} NaN values in features, filling with zeros")
+                X = np.nan_to_num(X, nan=0.0)
             
             # Prepare target (next period return)
             y_price = df_features[target_col].shift(-1).dropna().values

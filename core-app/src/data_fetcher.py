@@ -4,6 +4,7 @@ import asyncio
 import websocket
 import json
 import threading
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Callable
 from loguru import logger
@@ -68,7 +69,7 @@ class DataFetcher:
                     current_timestamp = ohlcv[-1][0] + 1
                     
                     # Rate limiting
-                    await asyncio.sleep(0.1)
+                    time.sleep(0.1)
                     
                 except Exception as e:
                     logger.warning(f"Error in batch fetch: {e}")

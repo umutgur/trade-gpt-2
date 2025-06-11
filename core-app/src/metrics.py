@@ -211,6 +211,7 @@ class MetricsCalculator:
     def calculate_trading_metrics(self, symbol: str, trading_mode: str, 
                                 period_days: int = 7) -> Dict:
         """Calculate comprehensive trading metrics"""
+        session = None
         try:
             # Get trades from database
             session = db_manager.get_session()
@@ -225,7 +226,19 @@ class MetricsCalculator:
                 .all()
             
             if not trades:
-                logger.warning(f"No trades found for {symbol} ({trading_mode})")
+                # Only log this warning once per hour to reduce noise
+                import time
+                current_time = time.time()
+                cache_key = f"no_trades_warning_{symbol}_{trading_mode}"
+                
+                if not hasattr(self, '_warning_cache'):
+                    self._warning_cache = {}
+                
+                last_warning_time = self._warning_cache.get(cache_key, 0)
+                if current_time - last_warning_time > 3600:  # 1 hour
+                    logger.warning(f"No trades found for {symbol} ({trading_mode})")
+                    self._warning_cache[cache_key] = current_time
+                
                 return {}
             
             # Convert to list of dicts
@@ -275,14 +288,15 @@ class MetricsCalculator:
             if len(portfolio_series) > 0:
                 metrics['total_return'] = ((portfolio_series.iloc[-1] / portfolio_series.iloc[0]) - 1) * 100
             
-            session.close()
-            
             logger.info(f"Calculated metrics for {symbol} ({trading_mode}): {metrics}")
             return metrics
             
         except Exception as e:
             logger.error(f"Error calculating trading metrics: {e}")
             return {}
+        finally:
+            if session:
+                session.close()
     
     def save_metrics(self, symbol: str, trading_mode: str, metrics: Dict, 
                     period: str = "daily") -> bool:

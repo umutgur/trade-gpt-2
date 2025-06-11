@@ -95,8 +95,26 @@ class Metrics(Base):
 
 class DatabaseManager:
     def __init__(self):
-        self.engine = create_engine(config.database_url)
+        # Optimized engine configuration with proper pooling
+        self.engine = create_engine(
+            config.database_url,
+            pool_size=20,                    # Increase pool size
+            max_overflow=30,                 # Allow more overflow connections
+            pool_timeout=60,                 # Increase timeout
+            pool_recycle=3600,              # Recycle connections every hour
+            pool_pre_ping=True,             # Verify connections before use
+            echo=False                      # Disable SQL logging for performance
+        )
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+        
+        # Model references for easy access
+        self.MarketData = MarketData
+        self.Strategy = Strategy
+        self.LSTMModel = LSTMModel
+        self.Backtest = Backtest
+        self.Trade = Trade
+        self.Metrics = Metrics
+        
         self.create_tables()
     
     def create_tables(self):
@@ -111,6 +129,24 @@ class DatabaseManager:
     def get_session(self):
         """Get database session"""
         return self.SessionLocal()
+    
+    def get_session_context(self):
+        """Get database session with context manager for automatic cleanup"""
+        from contextlib import contextmanager
+        
+        @contextmanager
+        def _session_scope():
+            session = self.SessionLocal()
+            try:
+                yield session
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
+            finally:
+                session.close()
+        
+        return _session_scope()
     
     def insert_market_data(self, data: list[dict]) -> bool:
         """Insert market data batch"""

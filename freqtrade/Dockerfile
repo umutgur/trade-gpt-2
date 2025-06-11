@@ -1,17 +1,15 @@
 FROM freqtradeorg/freqtrade:stable
 
-# Switch to root to install additional packages
-USER root
-
-# Install additional Python packages
+# Install additional Python packages if needed
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 # Create necessary directories
 RUN mkdir -p /freqtrade/user_data/data /freqtrade/user_data/logs
 
-# Switch back to freqtrade user
-USER freqtrade
+# Ensure proper permissions
+RUN chown -R ftuser:ftuser /freqtrade/user_data
 
-# Set working directory
+# Switch back to ftuser
+USER ftuser
 WORKDIR /freqtrade

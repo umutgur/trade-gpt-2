@@ -63,9 +63,11 @@
         "exit": "gtc"
     },
     
-    "pairlist": {
-        "method": "StaticPairList"
-    },
+    "pairlists": [
+        {
+            "method": "StaticPairList"
+        }
+    ],
     
     "dataformat_ohlcv": "json",
     "dataformat_trades": "jsongz",

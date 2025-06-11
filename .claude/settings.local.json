@@ -1,7 +1,24 @@
 {
   "permissions": {
     "allow": [
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker:*)",
+      "Bash(ls:*)",
+      "Bash(curl:*)",
+      "Bash(pkill:*)",
+      "Bash(open:*)",
+      "Bash(pg_isready:*)",
+      "Bash(find:*)",
+      "Bash(python test:*)",
+      "Bash(sed:*)",
+      "Bash(python:*)",
+      "Bash(pip install:*)",
+      "Bash(__NEW_LINE__ docker compose exec core-app python3 -c \"\nprint(''1. Testing Data Fetcher...'')\nfrom src.data_fetcher import data_fetcher\ndf = data_fetcher.fetch_ohlcv(''BTC/USDT'', limit=5)\nprint(f''   ✓ Fetched {len(df)} candles'')\n\nprint(''2. Testing Technical Analysis...'')\nfrom src.ta_features import ta_analyzer\ndf_features = ta_analyzer.add_all_features(df)\nprint(f''   ✓ Added {df_features.shape[1] - df.shape[1]} technical features'')\n\nprint(''3. Testing Model Manager...'')\nfrom src.lstm_model import model_manager\nprint(f''   ✓ Model manager initialized (TensorFlow: {model_manager.models.__class__.__name__ == \"\"dict\"\"})'') \n\nprint(''4. Testing LLM Strategy...'')\nfrom src.llm_strategy import llm_engine\nprint(f''   ✓ LLM Engine available: {llm_engine.llm_available}'')\n\nprint(''5. Testing Database...'')\nfrom src.db import db_manager\nsession = db_manager.get_session()\ntrade_count = session.query(db_manager.Trade).count()\nstrategy_count = session.query(db_manager.Strategy).count()\nsession.close()\nprint(f''   ✓ Trades in DB: {trade_count}'')\nprint(f''   ✓ Strategies in DB: {strategy_count}'')\n\nprint(''\\n🎉 ALL CORE COMPONENTS WORKING!'')\n\")",
+      "Bash(timeout 30 docker compose build core-app)",
+      "Bash(grep:*)",
+      "Bash(echo:*)",
+      "Bash(rm:*)"
     ],
     "deny": []
   }

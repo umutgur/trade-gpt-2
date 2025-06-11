@@ -27,11 +27,16 @@ class Config:
     # Symbols to trade
     SYMBOLS: list[str] = ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "ADA/USDT"]
     
-    # Model parameters
-    LSTM_UNITS: int = 50
+    # Model parameters - Balanced for quality and speed
+    LSTM_UNITS: int = 50  # Restored for better capacity
     DROPOUT_RATE: float = 0.2
-    EPOCHS: int = 50
-    BATCH_SIZE: int = 32
+    EPOCHS: int = 100  # Increased with early stopping for quality
+    BATCH_SIZE: int = 32  # Balanced for stability
+    
+    # Training optimization parameters
+    EARLY_STOPPING_PATIENCE: int = 15  # Allow more time for convergence
+    MIN_TRAINING_SAMPLES: int = 500  # Minimum data for quality training
+    MAX_TRAINING_SAMPLES: int = 2000  # Increased limit for better models
     
     # Risk management
     MAX_POSITIONS: int = 3
@@ -59,8 +64,12 @@ class Config:
 config = Config()
 
 # Configure logging
+import os
+log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+os.makedirs(log_dir, exist_ok=True)
+
 logger.add(
-    "/app/logs/trade_system_{time}.log",
+    os.path.join(log_dir, "trade_system_{time}.log"),
     rotation="1 day",
     retention="30 days",
     level="INFO",

@@ -40,8 +40,9 @@ graph TB
 - **Risk Management**: Automated stop-loss, take-profit, position sizing
 
 ### 🧠 LSTM Price Prediction
-- **TensorFlow/Keras**: Multi-layer LSTM with dropout
-- **Feature Engineering**: Technical indicators + price action
+- **TensorFlow/Keras**: Multi-layer LSTM with dropout and early stopping
+- **Feature Engineering**: 20+ technical indicators with adaptive window sizes
+- **Robust Pipeline**: NaN/Inf validation, input sanitization, quality checks
 - **Direction Prediction**: -1/0/+1 classification with confidence scores
 
 ### 📈 Trading Modes
@@ -50,13 +51,17 @@ graph TB
 - **Futures Trading**: 2x leverage with funding rate awareness
 
 ### 🔄 Automation Pipeline
-- **Airflow DAG**: Every 15 minutes
-- **Pipeline**: `fetch_data → prepare_data → generate_strategy → backtest → train_lstm → papertrade → log_metrics → feedback_to_llm`
+- **Training Pipeline**: Every 4 hours (model training & strategy generation)
+- **Paper Trading Pipeline**: Every 15 minutes (LSTM-based live trading simulation)
+- **Feedback Pipeline**: Every 6 hours (performance analysis & model improvement)
+- **Training**: `fetch_data → prepare_data → generate_strategy → backtest → train_lstm → log_metrics → feedback_to_llm`
+- **Paper Trading**: `fetch_current_data → execute_lstm_paper_trades → calculate_paper_metrics → monitor_portfolio`
 
 ### 📱 Dashboard
-- **Streamlit Interface**: Multi-tab dashboard
-- **Real-time Charts**: Price, P&L, equity curves
-- **Analytics**: Performance heatmaps, trade history
+- **Streamlit Interface**: Multi-tab dashboard with dedicated paper trading section
+- **Real-time Charts**: Price with LSTM predictions, P&L, equity curves
+- **Paper Trading Monitor**: Live portfolio tracking, active positions, trade history
+- **Analytics**: Performance heatmaps, trade history, LSTM model status
 - **Risk Monitoring**: VaR, drawdown, exposure tracking
 
 ## 🚀 Quick Start
@@ -89,8 +94,8 @@ docker compose up -d
 ```
 
 4. **Access interfaces**:
-- **Dashboard**: http://localhost:8501
-- **Airflow**: http://localhost:8080 (airflow/airflow)
+- **Dashboard**: http://localhost:8501 (with dedicated Paper Trading tab)
+- **Airflow**: http://localhost:8080 (airflow/airflow) - Monitor pipelines
 - **Database**: localhost:5432
 
 ## 📁 Project Structure
@@ -120,7 +125,9 @@ trade-gpt-2/
 ├── airflow/                   # Workflow orchestration
 │   ├── Dockerfile
 │   └── dags/
-│       └── trade_pipeline.py  # Main pipeline DAG
+│       ├── trade_pipeline.py      # Training pipeline (4h)
+│       ├── paper_trading_pipeline.py  # Paper trading (15m)
+│       └── feedback_pipeline.py   # Feedback system (6h)
 └── tests/                     # Unit tests
     └── test_core_modules.py
 ```
@@ -133,6 +140,12 @@ TIMEFRAME = "15m"              # Candle timeframe
 SEQ_LENGTH = 60               # LSTM sequence length
 SYMBOLS = ["BTC/USDT", "ETH/USDT", ...]  # Trading pairs
 RETRAIN_EVERY = 96            # Model retraining frequency
+
+# LSTM Model Parameters (Balanced for Quality & Speed)
+LSTM_UNITS = 50               # Model capacity
+EPOCHS = 100                  # Training epochs with early stopping
+MIN_TRAINING_SAMPLES = 500    # Minimum data for quality training
+MAX_TRAINING_SAMPLES = 2000   # Maximum to prevent overfitting
 ```
 
 ### Trading Modes
@@ -143,10 +156,17 @@ RETRAIN_EVERY = 96            # Model retraining frequency
 ## 📊 Dashboard Features
 
 ### Overview Tab
-- Portfolio P&L summary
+- Portfolio P&L summary (paper + live trades)
 - Average Sharpe ratio
 - LSTM prediction accuracy
-- Performance heatmap
+- Performance heatmap across all trading modes
+
+### Paper Trading Tab 🆕
+- **Live Portfolio Monitor**: Real-time portfolio value, cash, unrealized P&L
+- **Active Positions**: Symbol, mode, entry price, current P&L
+- **Trade Execution**: Manual paper trade execution with LSTM predictions
+- **Performance Charts**: Paper trade timeline and cumulative P&L
+- **LSTM Model Status**: Training status, MAPE scores, last update times
 
 ### Trading Tabs (Spot/Margin/Futures)
 - Real-time price charts with LSTM predictions
@@ -211,11 +231,19 @@ Tests cover:
 
 ## 📋 Roadmap
 
+### ✅ Recently Completed
+- [x] **LSTM-based Paper Trading**: Continuous paper trading with LSTM predictions
+- [x] **Multi-DAG Architecture**: Separate pipelines for training, trading, and feedback
+- [x] **Enhanced Dashboard**: Dedicated paper trading monitoring tab
+- [x] **NaN Prediction Fix**: Robust LSTM pipeline with input validation
+- [x] **Adaptive Technical Analysis**: Dynamic indicator windows based on data length
+
+### 🎯 Next Priorities
 - [ ] Multi-exchange support (Coinbase, Kraken)
-- [ ] Advanced portfolio optimization
-- [ ] Sentiment analysis integration
+- [ ] Advanced portfolio optimization with Kelly Criterion
+- [ ] Sentiment analysis integration (Twitter, Reddit, news)
 - [ ] Mobile app interface
-- [ ] Real money trading (with safeguards)
+- [ ] Real money trading (with comprehensive safeguards)
 
 ## 🤝 Contributing
 

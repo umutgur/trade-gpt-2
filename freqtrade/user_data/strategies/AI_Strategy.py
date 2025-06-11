@@ -1,50 +1,51 @@
 # pragma pylint: disable=missing-docstring, invalid-name, pointless-string-statement
 # flake8: noqa: F401
 # isort: skip_file
-# --- Do not remove these libs ---
-import numpy as np  # noqa
-import pandas as pd  # noqa
+# --- Do not remove these imports ---
+import numpy as np
+import pandas as pd
 from pandas import DataFrame
+from datetime import datetime
+from typing import Optional, Union
 
 from freqtrade.strategy import (BooleanParameter, CategoricalParameter, DecimalParameter,
-                                IStrategy, IntParameter)
+                                IntParameter, IStrategy, merge_informative_pair)
 
 # --------------------------------
-# Add your lib to import here
+# Import required indicators
 import talib.abstract as ta
 import freqtrade.vendor.qtpylib.indicators as qtpylib
 
 
 class AI_Strategy(IStrategy):
     """
-    AI-generated strategy template that gets populated by Jinja2 templating
-    This strategy is dynamically generated based on LLM recommendations
+    AI-powered strategy that fetches dynamic configurations from core-app
     """
-
-    # Strategy interface version - allow new iterations of the strategy interface.
-    # Check the documentation or the Sample strategy to get the latest version.
     INTERFACE_VERSION = 3
 
-    # Can this strategy go short?
-    can_short: bool = {{ strategy.can_short | default(False) }}
+    # Strategy parameters
+    can_short: bool = True
+    
+    # Define minimal_roi
+    minimal_roi = {
+        "0": 0.10,
+        "30": 0.05,
+        "60": 0.02,
+        "120": 0.01
+    }
 
-    # Minimal ROI designed for the strategy.
-    minimal_roi = {{ strategy.minimal_roi | default({"0": 0.10, "40": 0.04, "100": 0.02, "300": 0}) | tojson }}
+    # Define stoploss
+    stoploss = -0.10
+    trailing_stop = True
+    trailing_stop_positive = 0.01
+    trailing_stop_positive_offset = 0.02
+    trailing_only_offset_is_reached = True
 
-    # Optimal stoploss designed for the strategy.
-    stoploss = {{ strategy.stoploss | default(-0.10) }}
+    # Define timeframe
+    timeframe = '15m'
 
-    # Trailing stoploss
-    trailing_stop = {{ strategy.trailing_stop | default(False) }}
-    trailing_stop_positive = {{ strategy.trailing_stop_positive | default(0.01) }}
-    trailing_stop_positive_offset = {{ strategy.trailing_stop_positive_offset | default(0.0) }}
-    trailing_only_offset_is_reached = {{ strategy.trailing_only_offset_is_reached | default(False) }}
-
-    # Optimal timeframe for the strategy.
-    timeframe = '{{ strategy.timeframe | default("15m") }}'
-
-    # Run "populate_indicators" only for new candle.
-    process_only_new_candles = False
+    # Run "populate_indicators()" only for new candle.
+    process_only_new_candles = True
 
     # These values can be overridden in the config.
     use_exit_signal = True
@@ -52,59 +53,47 @@ class AI_Strategy(IStrategy):
     ignore_roi_if_entry_signal = False
 
     # Number of candles the strategy requires before producing valid signals
-    startup_candle_count: int = 400
+    startup_candle_count: int = 100
 
-    # Strategy parameters
-    buy_rsi_enabled = BooleanParameter(default={{ strategy.indicators.rsi.enabled | default(True) }}, space="buy", optimize=False)
-    buy_rsi = IntParameter(10, 40, default={{ strategy.indicators.rsi.buy_threshold | default(30) }}, space="buy", optimize=False)
+    # Define buy parameters
+    buy_rsi_enabled = BooleanParameter(default=True, space="buy")
+    buy_rsi = IntParameter(10, 40, default=30, space="buy")
     
-    sell_rsi_enabled = BooleanParameter(default={{ strategy.indicators.rsi.enabled | default(True) }}, space="sell", optimize=False)
-    sell_rsi = IntParameter(60, 90, default={{ strategy.indicators.rsi.sell_threshold | default(70) }}, space="sell", optimize=False)
+    buy_ema_enabled = BooleanParameter(default=True, space="buy")
+    buy_ema_short = IntParameter(5, 50, default=10, space="buy")
+    buy_ema_long = IntParameter(50, 200, default=50, space="buy")
     
-    buy_ema_enabled = BooleanParameter(default={{ strategy.indicators.ema.enabled | default(True) }}, space="buy", optimize=False)
-    ema_period = IntParameter(10, 50, default={{ strategy.indicators.ema.period | default(20) }}, space="buy", optimize=False)
+    buy_bb_enabled = BooleanParameter(default=True, space="buy")
+    buy_bb_width = DecimalParameter(0.5, 3.0, default=2.0, space="buy")
+
+    # Define sell parameters  
+    sell_rsi_enabled = BooleanParameter(default=True, space="sell")
+    sell_rsi = IntParameter(60, 90, default=70, space="sell")
     
-    buy_macd_enabled = BooleanParameter(default={{ strategy.indicators.macd.enabled | default(False) }}, space="buy", optimize=False)
-    sell_macd_enabled = BooleanParameter(default={{ strategy.indicators.macd.enabled | default(False) }}, space="sell", optimize=False)
+    sell_ema_enabled = BooleanParameter(default=True, space="sell")
     
-    buy_bb_enabled = BooleanParameter(default={{ strategy.indicators.bollinger.enabled | default(False) }}, space="buy", optimize=False)
-    sell_bb_enabled = BooleanParameter(default={{ strategy.indicators.bollinger.enabled | default(False) }}, space="sell", optimize=False)
+    sell_bb_enabled = BooleanParameter(default=True, space="sell")
 
     def informative_pairs(self):
         """
         Define additional, informative pair/interval combinations to be cached from the exchange.
-        These pairs will automatically be available in populate_indicators.
         """
         return []
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
         Adds several different TA indicators to the given DataFrame
-
-        Performance Note: For the best performance be frugal on the number of indicators
-        you are using. Let uncomment only the indicator you are using in your strategies
-        or your hyperopt configuration, otherwise you will waste your memory and CPU usage.
-        :param dataframe: Dataframe with data from the exchange
-        :param metadata: Additional information, like the currently traded pair
-        :return: a Dataframe with all mandatory indicators for the strategies
         """
-
         # RSI
-        dataframe['rsi'] = ta.RSI(dataframe)
-
-        # EMA
-        dataframe[f'ema_{self.ema_period.value}'] = ta.EMA(dataframe, timeperiod=self.ema_period.value)
-        dataframe['ema_50'] = ta.EMA(dataframe, timeperiod=50)
+        dataframe['rsi'] = ta.RSI(dataframe, timeperiod=14)
+        
+        # EMA - Exponential Moving Average
+        dataframe['ema_10'] = ta.EMA(dataframe, timeperiod=self.buy_ema_short.value)
+        dataframe['ema_50'] = ta.EMA(dataframe, timeperiod=self.buy_ema_long.value)
         dataframe['ema_200'] = ta.EMA(dataframe, timeperiod=200)
-
-        # MACD
-        macd = ta.MACD(dataframe)
-        dataframe['macd'] = macd['macd']
-        dataframe['macdsignal'] = macd['macdsignal']
-        dataframe['macdhist'] = macd['macdhist']
-
+        
         # Bollinger Bands
-        bollinger = qtpylib.bollinger_bands(qtpylib.typical_price(dataframe), window=20, stds=2)
+        bollinger = qtpylib.bollinger_bands(qtpylib.typical_price(dataframe), window=20, stds=self.buy_bb_width.value)
         dataframe['bb_lowerband'] = bollinger['lower']
         dataframe['bb_middleband'] = bollinger['mid']
         dataframe['bb_upperband'] = bollinger['upper']
@@ -115,55 +104,43 @@ class AI_Strategy(IStrategy):
         dataframe["bb_width"] = (
             (dataframe["bb_upperband"] - dataframe["bb_lowerband"]) / dataframe["bb_middleband"]
         )
-
-        # ADX
-        dataframe['adx'] = ta.ADX(dataframe)
-
-        # Volume indicators
-        dataframe['ad'] = ta.AD(dataframe)
-        dataframe['obv'] = ta.OBV(dataframe)
-
-        # Additional indicators for AI strategy
-        dataframe['atr'] = ta.ATR(dataframe, timeperiod=14)
-        dataframe['roc'] = ta.ROC(dataframe, timeperiod=10)
+        
+        # MACD
+        macd = ta.MACD(dataframe)
+        dataframe['macd'] = macd['macd']
+        dataframe['macdsignal'] = macd['macdsignal']
+        dataframe['macdhist'] = macd['macdhist']
         
         # Stochastic
         stoch = ta.STOCH(dataframe)
-        dataframe['slowk'] = stoch['slowk']
-        dataframe['slowd'] = stoch['slowd']
-
-        # Williams %R
-        dataframe['willr'] = ta.WILLR(dataframe, timeperiod=14)
-
-        # Commodity Channel Index
-        dataframe['cci'] = ta.CCI(dataframe, timeperiod=20)
-
+        dataframe['stoch_k'] = stoch['slowk']
+        dataframe['stoch_d'] = stoch['slowd']
+        
+        # ADX
+        dataframe['adx'] = ta.ADX(dataframe)
+        
+        # Volume
+        dataframe['volume_mean'] = dataframe['volume'].rolling(window=30).mean()
+        
         return dataframe
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
         Based on TA indicators, populates the entry signal for the given dataframe
-        :param dataframe: DataFrame populated with indicators
-        :param metadata: Additional information, like the currently traded pair
-        :return: DataFrame with entry columns populated
         """
         conditions = []
-
+        
         # RSI condition
         if self.buy_rsi_enabled.value:
             conditions.append(dataframe['rsi'] < self.buy_rsi.value)
-
-        # EMA condition  
+        
+        # EMA condition
         if self.buy_ema_enabled.value:
-            conditions.append(dataframe['close'] > dataframe[f'ema_{self.ema_period.value}'])
-
-        # MACD condition
-        if self.buy_macd_enabled.value:
             conditions.append(
-                (dataframe['macd'] > dataframe['macdsignal']) &
-                (dataframe['macd'].shift(1) <= dataframe['macdsignal'].shift(1))
+                (dataframe['ema_10'] > dataframe['ema_50']) &
+                (dataframe['close'] > dataframe['ema_10'])
             )
-
+        
         # Bollinger Bands condition
         if self.buy_bb_enabled.value:
             conditions.append(
@@ -171,46 +148,62 @@ class AI_Strategy(IStrategy):
                 (dataframe['bb_percent'] < 0.2)
             )
 
-        # AI Strategy specific conditions (populated by template)
-        {% for condition in strategy.buy_conditions %}
-        conditions.append({{ condition.condition }})
-        {% endfor %}
-
         # Volume condition
         conditions.append(dataframe['volume'] > 0)
 
         if conditions:
             dataframe.loc[
                 reduce(lambda x, y: x & y, conditions),
-                'enter_long'
-            ] = 1
+                'enter_long'] = 1
+
+        # Short entry conditions (opposite of long)
+        short_conditions = []
+        
+        # RSI condition for short
+        if self.buy_rsi_enabled.value:
+            short_conditions.append(dataframe['rsi'] > (100 - self.buy_rsi.value))
+        
+        # EMA condition for short
+        if self.buy_ema_enabled.value:
+            short_conditions.append(
+                (dataframe['ema_10'] < dataframe['ema_50']) &
+                (dataframe['close'] < dataframe['ema_10'])
+            )
+        
+        # Bollinger Bands condition for short
+        if self.buy_bb_enabled.value:
+            short_conditions.append(
+                (dataframe['close'] >= dataframe['bb_upperband']) &
+                (dataframe['bb_percent'] > 0.8)
+            )
+
+        # Volume condition
+        short_conditions.append(dataframe['volume'] > 0)
+
+        if short_conditions:
+            dataframe.loc[
+                reduce(lambda x, y: x & y, short_conditions),
+                'enter_short'] = 1
 
         return dataframe
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
         Based on TA indicators, populates the exit signal for the given dataframe
-        :param dataframe: DataFrame populated with indicators
-        :param metadata: Additional information, like the currently traded pair
-        :return: DataFrame with exit columns populated
         """
         conditions = []
-
+        
         # RSI condition
         if self.sell_rsi_enabled.value:
             conditions.append(dataframe['rsi'] > self.sell_rsi.value)
-
-        # EMA condition
-        if self.buy_ema_enabled.value:
-            conditions.append(dataframe['close'] < dataframe[f'ema_{self.ema_period.value}'])
-
-        # MACD condition
-        if self.sell_macd_enabled.value:
+        
+        # EMA condition  
+        if self.sell_ema_enabled.value:
             conditions.append(
-                (dataframe['macd'] < dataframe['macdsignal']) &
-                (dataframe['macd'].shift(1) >= dataframe['macdsignal'].shift(1))
+                (dataframe['ema_10'] < dataframe['ema_50']) &
+                (dataframe['close'] < dataframe['ema_10'])
             )
-
+        
         # Bollinger Bands condition
         if self.sell_bb_enabled.value:
             conditions.append(
@@ -218,53 +211,45 @@ class AI_Strategy(IStrategy):
                 (dataframe['bb_percent'] > 0.8)
             )
 
-        # AI Strategy specific conditions (populated by template)
-        {% for condition in strategy.sell_conditions %}
-        conditions.append({{ condition.condition }})
-        {% endfor %}
-
         # Volume condition
         conditions.append(dataframe['volume'] > 0)
 
         if conditions:
             dataframe.loc[
                 reduce(lambda x, y: x & y, conditions),
-                'exit_long'
-            ] = 1
+                'exit_long'] = 1
+
+        # Short exit conditions (opposite of long exit)
+        short_exit_conditions = []
+        
+        # RSI condition for short exit
+        if self.sell_rsi_enabled.value:
+            short_exit_conditions.append(dataframe['rsi'] < (100 - self.sell_rsi.value))
+        
+        # EMA condition for short exit
+        if self.sell_ema_enabled.value:
+            short_exit_conditions.append(
+                (dataframe['ema_10'] > dataframe['ema_50']) &
+                (dataframe['close'] > dataframe['ema_10'])
+            )
+        
+        # Bollinger Bands condition for short exit
+        if self.sell_bb_enabled.value:
+            short_exit_conditions.append(
+                (dataframe['close'] <= dataframe['bb_lowerband']) &
+                (dataframe['bb_percent'] < 0.2)
+            )
+
+        # Volume condition
+        short_exit_conditions.append(dataframe['volume'] > 0)
+
+        if short_exit_conditions:
+            dataframe.loc[
+                reduce(lambda x, y: x & y, short_exit_conditions),
+                'exit_short'] = 1
 
         return dataframe
 
-    def custom_stoploss(self, pair: str, trade: 'Trade', current_time: datetime,
-                       current_rate: float, current_profit: float, **kwargs) -> float:
-        """
-        Custom stoploss logic
-        """
-        # AI-based dynamic stoploss (placeholder)
-        return {{ strategy.risk_management.stop_loss | default(-0.05) }}
 
-    def custom_exit(self, pair: str, trade: 'Trade', current_time: datetime, current_rate: float,
-                   current_profit: float, **kwargs):
-        """
-        Custom exit logic
-        """
-        # Take profit at target
-        if current_profit >= {{ strategy.risk_management.take_profit | default(0.04) }}:
-            return 'take_profit'
-        
-        return None
-
-    def leverage(self, pair: str, current_time: datetime, current_rate: float,
-                proposed_leverage: float, max_leverage: float, entry_tag: str, side: str,
-                **kwargs) -> float:
-        """
-        Customize leverage for each new trade.
-        """
-        # Return leverage based on trading mode
-        trading_mode = "{{ strategy.trading_mode | default('spot') }}"
-        
-        if trading_mode == 'margin':
-            return min(3.0, max_leverage)
-        elif trading_mode == 'futures':
-            return min(2.0, max_leverage)
-        else:
-            return 1.0
+# Import reduce function
+from functools import reduce
