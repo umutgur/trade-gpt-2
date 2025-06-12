@@ -239,7 +239,9 @@ class DatabaseManager:
                 trading_mode=trading_mode,
                 start_date=start_date,
                 end_date=end_date,
-                initial_balance=results.get("initial_balance", 10000),
+                from .config import Config
+                config = Config()
+                initial_balance=results.get("initial_balance", config.INITIAL_PORTFOLIO_VALUE),
                 final_balance=results.get("final_balance", 0),
                 total_return=results.get("total_return", 0),
                 sharpe_ratio=results.get("sharpe_ratio"),

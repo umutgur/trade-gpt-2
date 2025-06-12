@@ -14,7 +14,9 @@ from ta_features import ta_analyzer
 class PaperTrader:
     def __init__(self):
         self.positions = {}  # {symbol: {mode: position_info}}
-        self.portfolio_value = 10000  # Starting capital per mode
+        from .config import Config
+        config = Config()
+        self.portfolio_value = config.INITIAL_PORTFOLIO_VALUE  # Starting capital per mode
         self.min_trade_amount = 50  # Minimum trade size
         self.max_position_size = 0.2  # 20% of portfolio max per position
         self.stop_loss_pct = 0.02  # 2% stop loss

@@ -167,11 +167,11 @@ class TradingDashboard:
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            total_pnl = self.get_total_pnl()
+            from .config import Config\n            config = Config()\n            total_pnl = self.get_total_pnl()
             st.metric(
                 "Total P&L (7d)",
                 f"${total_pnl:.2f}",
-                delta=f"{(total_pnl/10000)*100:.2f}%"
+                delta=f"{(total_pnl/config.INITIAL_PORTFOLIO_VALUE)*100:.2f}%"
             )
         
         with col2:
@@ -206,12 +206,12 @@ class TradingDashboard:
         with col1:
             # Equity curve chart
             equity_fig = self.create_equity_curve_chart()
-            st.plotly_chart(equity_fig, use_container_width=True)
+            st.plotly_chart(equity_fig, use_container_width=True, key="overview_equity_chart")
         
         with col2:
             # Symbol performance heatmap
             heatmap_fig = self.create_performance_heatmap()
-            st.plotly_chart(heatmap_fig, use_container_width=True)
+            st.plotly_chart(heatmap_fig, use_container_width=True, key="overview_heatmap_chart")
         
         # Recent activities
         st.subheader("🎯 Recent Activities")
@@ -286,12 +286,12 @@ class TradingDashboard:
         with col1:
             # Price chart with predictions
             price_fig = self.create_price_prediction_chart(symbol, trading_mode)
-            st.plotly_chart(price_fig, use_container_width=True)
+            st.plotly_chart(price_fig, use_container_width=True, key=f"trading_price_chart_{symbol}_{trading_mode}")
         
         with col2:
             # P&L chart
             pnl_fig = self.create_pnl_chart(symbol, trading_mode)
-            st.plotly_chart(pnl_fig, use_container_width=True)
+            st.plotly_chart(pnl_fig, use_container_width=True, key=f"trading_pnl_chart_{symbol}_{trading_mode}")
         
         # Strategy and trades
         col1, col2 = st.columns(2)
@@ -362,12 +362,12 @@ class TradingDashboard:
             with col1:
                 # Performance metrics chart
                 metrics_fig = self.create_backtest_metrics_chart(backtest_data)
-                st.plotly_chart(metrics_fig, use_container_width=True)
+                st.plotly_chart(metrics_fig, use_container_width=True, key="backtest_metrics_chart")
             
             with col2:
                 # Equity curve
                 equity_fig = self.create_backtest_equity_curve(backtest_data)
-                st.plotly_chart(equity_fig, use_container_width=True)
+                st.plotly_chart(equity_fig, use_container_width=True, key="backtest_equity_chart")
             
             # Detailed results table
             st.subheader("📋 Detailed Results")
@@ -379,7 +379,7 @@ class TradingDashboard:
         # Strategy performance heatmap
         st.subheader("🔥 Strategy Performance Heatmap")
         strategy_heatmap = self.create_strategy_performance_heatmap()
-        st.plotly_chart(strategy_heatmap, use_container_width=True)
+        st.plotly_chart(strategy_heatmap, use_container_width=True, key="backtest_strategy_heatmap")
     
     def get_total_pnl(self) -> float:
         """Get total P&L across all modes"""
@@ -459,19 +459,23 @@ class TradingDashboard:
                 if recent_trades:
                     # Calculate cumulative P&L
                     dates = [trade.timestamp for trade in recent_trades]
-                    portfolio_value = [10000]  # Starting value
+                    from .config import Config
+                    config = Config()
+                    portfolio_value = [config.INITIAL_PORTFOLIO_VALUE]  # Starting value
                     
                     running_pnl = 0
                     for trade in recent_trades:
                         if trade.profit_loss:
                             running_pnl += trade.profit_loss
-                        portfolio_value.append(10000 + running_pnl)
+                        portfolio_value.append(config.INITIAL_PORTFOLIO_VALUE + running_pnl)
                     
                     dates.insert(0, datetime.now() - timedelta(days=30))
                 else:
                     # No trades yet - show flat line
                     dates = pd.date_range(start=datetime.now() - timedelta(days=30), end=datetime.now(), freq='D')
-                    portfolio_value = [10000] * len(dates)
+                    from .config import Config
+                    config = Config()
+                    portfolio_value = [config.INITIAL_PORTFOLIO_VALUE] * len(dates)
             finally:
                 session.close()
             
@@ -638,36 +642,77 @@ class TradingDashboard:
                     
                     # Get prediction from model
                     try:
-                        # Real LSTM prediction from trained model
-                        # Get latest LSTM model from database
-                        latest_model = db_manager.get_session().query(db_manager.LSTMModel)\
-                            .filter(db_manager.LSTMModel.symbol == symbol)\
-                            .filter(db_manager.LSTMModel.is_active == True)\
-                            .order_by(db_manager.LSTMModel.created_at.desc())\
-                            .first()
+                        # Real LSTM prediction using trained model
+                        from .lstm_model import ModelManager
+                        from .ta_analyzer import TAAnalyzer
+                        import numpy as np
                         
-                        if latest_model and latest_model.mape:
-                            # Simple trend-based prediction (better than random)
-                            recent_change = (df['close'].iloc[-1] - df['close'].iloc[-5]) / df['close'].iloc[-5]
-                            pred_price = last_price * (1 + recent_change * 0.3)  # Conservative trend continuation
+                        model_manager = ModelManager()
+                        ta_analyzer = TAAnalyzer()
+                        
+                        # Get enhanced data with technical features
+                        enhanced_data = ta_analyzer.add_all_features(df.copy())
+                        ml_features = ta_analyzer.get_features_for_ml(enhanced_data)
+                        
+                        if ml_features and len(ml_features.get('features', [])) >= 60:
+                            features = np.array(ml_features['features'])
+                            # Use last 60 timesteps for prediction
+                            input_features = features[-60:].reshape(1, 60, -1)
                             
-                            fig.add_trace(go.Scatter(
-                                x=[df['timestamp'].iloc[-1], pred_time],
-                                y=[last_price, pred_price],
-                                mode='lines+markers',
-                                name=f'LSTM Prediction (MAPE: {latest_model.mape:.1f}%)',
-                                line=dict(color='#ff7f0e', width=2, dash='dash')
-                            ))
+                            # Get real LSTM prediction
+                            prediction_result = model_manager.get_prediction(symbol, input_features)
+                            
+                            if prediction_result and 'predicted_price' in prediction_result:
+                                pred_price = prediction_result['predicted_price']
+                                confidence = prediction_result.get('confidence', 0.5)
+                                
+                                # Add prediction line to chart
+                                fig.add_trace(go.Scatter(
+                                    x=[df['timestamp'].iloc[-1], pred_time],
+                                    y=[last_price, pred_price],
+                                    mode='lines+markers',
+                                    name=f'LSTM Prediction (Conf: {confidence:.2f})',
+                                    line=dict(color='#ff7f0e', width=2, dash='dash'),
+                                    marker=dict(size=8)
+                                ))
+                                
+                                # Add confidence indicator
+                                confidence_color = 'green' if confidence > 0.7 else 'orange' if confidence > 0.5 else 'red'
+                                fig.add_annotation(
+                                    x=pred_time, y=pred_price,
+                                    text=f"${pred_price:.4f}<br>Conf: {confidence:.1%}",
+                                    showarrow=True, arrowhead=2,
+                                    bgcolor=confidence_color, bordercolor="white",
+                                    font=dict(color="white", size=10)
+                                )
+                            else:
+                                # Model exists but no prediction available
+                                fig.add_annotation(
+                                    x=pred_time, y=last_price,
+                                    text="Model training...",
+                                    showarrow=True, arrowhead=2,
+                                    bgcolor="orange", bordercolor="white",
+                                    font=dict(color="white")
+                                )
                         else:
-                            # No trained model available
+                            # Not enough data for prediction
                             fig.add_annotation(
                                 x=pred_time, y=last_price,
-                                text="Training model...",
+                                text="Insufficient data",
                                 showarrow=True, arrowhead=2,
-                                bgcolor="yellow", bordercolor="orange"
+                                bgcolor="red", bordercolor="white",
+                                font=dict(color="white")
                             )
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.error(f"Error generating LSTM prediction for {symbol}: {e}")
+                        # Show error indicator
+                        fig.add_annotation(
+                            x=pred_time, y=last_price,
+                            text="Prediction error",
+                            showarrow=True, arrowhead=2,
+                            bgcolor="red", bordercolor="white",
+                            font=dict(color="white")
+                        )
                 
                 fig.update_layout(
                     title=f"{symbol} Price & Prediction",
@@ -914,8 +959,10 @@ class TradingDashboard:
         
         if backtest_data and len(backtest_data) > 0:
             dates = [item.get('Date', '') for item in backtest_data]
-            initial_values = [float(item.get('Initial Balance', '10000')) for item in backtest_data]
-            final_values = [float(item.get('Final Balance', '10000')) for item in backtest_data]
+            from .config import Config
+            config = Config()
+            initial_values = [float(item.get('Initial Balance', str(config.INITIAL_PORTFOLIO_VALUE))) for item in backtest_data]
+            final_values = [float(item.get('Final Balance', str(config.INITIAL_PORTFOLIO_VALUE))) for item in backtest_data]
             
             fig.add_trace(go.Scatter(
                 x=dates, y=final_values,
@@ -926,7 +973,7 @@ class TradingDashboard:
             ))
             
             fig.add_hline(
-                y=initial_values[0] if initial_values else 10000,
+                y=initial_values[0] if initial_values else config.INITIAL_PORTFOLIO_VALUE,
                 line_dash="dash", line_color="gray",
                 annotation_text="Initial Balance"
             )
@@ -1158,12 +1205,12 @@ class TradingDashboard:
         with col1:
             # Paper trades chart
             paper_trades_fig = self.create_paper_trades_chart()
-            st.plotly_chart(paper_trades_fig, use_container_width=True)
+            st.plotly_chart(paper_trades_fig, use_container_width=True, key="paper_trades_chart")
         
         with col2:
             # Paper P&L chart
             paper_pnl_fig = self.create_paper_pnl_chart()
-            st.plotly_chart(paper_pnl_fig, use_container_width=True)
+            st.plotly_chart(paper_pnl_fig, use_container_width=True, key="paper_pnl_chart")
         
         # Recent Paper Trades
         st.subheader("📋 Recent Paper Trades")

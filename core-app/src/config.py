@@ -16,7 +16,7 @@ class Config:
     POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "tradepass")
     POSTGRES_DB: str = os.getenv("POSTGRES_DB", "tradedb")
     POSTGRES_HOST: str = os.getenv("POSTGRES_HOST", "localhost")
-    POSTGRES_PORT: int = int(os.getenv("POSTGRES_PORT", "5432"))
+    POSTGRES_PORT: int = int(os.getenv("POSTGRES_PORT", "5433"))
     
     # Trading Parameters
     TIMEFRAME: str = os.getenv("TIMEFRAME", "15m")
@@ -41,6 +41,9 @@ class Config:
     # Risk management
     MAX_POSITIONS: int = 3
     RISK_PER_TRADE: float = 0.02  # 2% risk per trade
+    
+    # Portfolio management
+    INITIAL_PORTFOLIO_VALUE: float = float(os.getenv("INITIAL_PORTFOLIO_VALUE", "10000"))
     
     @property
     def database_url(self) -> str:

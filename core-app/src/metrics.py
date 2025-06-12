@@ -257,7 +257,9 @@ class MetricsCalculator:
             
             for trade in trade_data:
                 cumulative_pnl += trade['profit_loss']
-                portfolio_values.append(10000 + cumulative_pnl)  # Assuming $10k starting capital
+                from .config import Config
+                config = Config()
+                portfolio_values.append(config.INITIAL_PORTFOLIO_VALUE + cumulative_pnl)  # Starting capital from config
             
             portfolio_series = pd.Series(portfolio_values)
             returns = self.calculate_returns(portfolio_series)

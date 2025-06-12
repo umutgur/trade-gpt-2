@@ -106,7 +106,7 @@ services:
       - AIRFLOW__WEBSERVER__DEFAULT_USER_PASSWORD=airflow
       - AIRFLOW__WEBSERVER__DEFAULT_USER_FIRSTNAME=Airflow
       - AIRFLOW__WEBSERVER__DEFAULT_USER_LASTNAME=Admin
-      - AIRFLOW__WEBSERVER__DEFAULT_USER_EMAIL=admin@example.com
+      - AIRFLOW__WEBSERVER__DEFAULT_USER_EMAIL=${ADMIN_EMAIL:-admin@tradebot.com}
       - AIRFLOW__WEBSERVER__DEFAULT_USER_ROLE=Admin
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - BINANCE_API_KEY=${BINANCE_API_KEY}
@@ -130,7 +130,7 @@ services:
       - trade_network
     command: >
       bash -c "airflow db init && 
-               airflow users create --username airflow --firstname Airflow --lastname Admin --role Admin --email admin@example.com --password airflow &&
+               airflow users create --username airflow --firstname Airflow --lastname Admin --role Admin --email ${ADMIN_EMAIL:-admin@tradebot.com} --password airflow &&
                airflow webserver"
     restart: unless-stopped
 
